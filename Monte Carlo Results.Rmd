@@ -34,8 +34,6 @@ X_true <- sapply(1:m, function(j) {
 # True system reliability
 rho_true <- beta0/(beta0 + sum(gamma0*alpha0*exp(-gamma0*(p - q)*tau)))
 cat("True system reliability:", rho_true, "\n")
-
-# Logit of true reliability (for normality assessment)
 theta_true <- log(rho_true / (1 - rho_true))
 
 # One Monte Carlo simulation
@@ -602,3 +600,4 @@ ggplot(results_tau, aes(x = tau)) +
   ) +
   theme_minimal(base_size = 12)
 ```
+
