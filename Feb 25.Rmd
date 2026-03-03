@@ -1,0 +1,604 @@
+---
+title: "Feb 25"
+author: "Dhananjani Welagedara"
+date: "2026-02-20"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Skewness corrected
+```{r}
+library(moments)
+set.seed(123)
+
+B <- c(2, 12, 5)
+m <- length(B)
+tau <- 5
+beta0 <- 12
+gamma0 <- c(0.05, 0.07, 0.06)
+alpha0 <- c(10, 12, 15)
+p <- c(0.9, 0.8, 0.85)
+q <- c(0.2, 0.15, 0.3)
+
+n_sim <- 10000
+S_values <- c(1:30)
+
+# X_j
+X_true <- sapply(1:m, function(j) {
+  alpha0[j]*(1 - exp(-gamma0[j]*(p[j]-q[j])*tau))/(p[j] - q[j])
+})
+
+# True system reliability
+rho_true <- beta0/(beta0 + sum(gamma0*alpha0*exp(-gamma0*(p - q)*tau)))
+cat("True system reliability:", rho_true, "\n")
+
+# Logit of true reliability (for normality assessment)
+theta_true <- log(rho_true / (1 - rho_true))
+
+# One Monte Carlo simulation
+one_simulation <- function(S) {
+  
+  N_0 <- rpois(1, S*beta0*tau)
+  beta_hat <- N_0/(S*tau)
+  
+  gamma_hat <- numeric(m)
+  alpha_hat <- numeric(m)
+  
+  for (j in 1:m) {
+    Lambda_j <- S*gamma0[j]*(alpha0[j] - (p[j] - q[j])*X_true[j])*tau
+    N_j <- rpois(1, Lambda_j)
+    if (N_j == 0) return(NA)
+    
+    gamma_hat[j] <- N_j/(S*tau*(alpha0[j] - (p[j] - q[j])*X_true[j]))
+    alpha_hat[j] <- N_j/(S*gamma_hat[j]*tau) + (p[j] - q[j])*X_true[j]
+  }
+  
+  denom <- beta_hat + sum(gamma_hat*(alpha_hat - (p - q)*X_true))
+  if (denom <= 0) return(NA)
+  
+  rho_hat <- beta_hat/denom
+  return(rho_hat)
+}
+
+# Storing results
+rho_storage <- vector("list", length(S_values))
+
+results_S <- data.frame(
+  S = S_values,
+  rho_true = rho_true,
+  mean_rho_hat = NA,
+  sd_rho_hat = NA,
+  abs_bias = NA,
+  skew_rho_hat = NA)
+
+for (i in seq_along(S_values)) {
+  S_val <- S_values[i]
+  
+  rho_hat_vec <- replicate(n_sim, one_simulation(S_val))
+  rho_hat_vec <- rho_hat_vec[!is.na(rho_hat_vec)]
+  
+  results_S$mean_rho_hat[i] <- mean(rho_hat_vec)
+  results_S$sd_rho_hat[i] <- sd(rho_hat_vec)
+  results_S$abs_bias[i] <- abs(mean(rho_hat_vec) - rho_true)
+  
+  # Logit transform + CLT scaling
+  theta_hat_vec <- log(rho_hat_vec / (1 - rho_hat_vec))
+  W_vec <- sqrt(S_val) * (theta_hat_vec - theta_true)
+  
+  # Skewness of scaled logit (correct)
+  results_S$skew_rho_hat[i] <- skewness(W_vec)
+  
+  rho_storage[[i]] <- rho_hat_vec
+}
+
+print(results_S)
+
+# Skewness threshold
+threshold_skew <- 0.08
+first_normal_index <- NA
+
+for (i in seq_along(S_values)) {
+  rho_hat_vec <- rho_storage[[i]]
+  theta_hat_vec <- log(rho_hat_vec / (1 - rho_hat_vec))
+  W_vec <- sqrt(S_values[i]) * (theta_hat_vec - theta_true)
+  
+  if (is.na(first_normal_index) && abs(skewness(W_vec)) < threshold_skew) {
+    first_normal_index <- i
+    break
+  }
+}
+
+if (is.na(first_normal_index)) {
+  cat("No S reaches approximate normality.\n")
+} else {
+  S_normal_threshold <- results_S$S[first_normal_index]
+  cat("Approximate normality first achieved for S =", S_normal_threshold, "\n")
+  
+  # Identify the indices
+  i_before <- max(1, first_normal_index - 1)  # make sure not <1
+  i_normal <- first_normal_index
+  i_after  <- min(length(S_values), first_normal_index + 1)  # make sure not > max S
+  
+  # Function to plot histogram with normal curve overlay
+  plot_histogram <- function(index, title_suffix) {
+    W_vec <- sqrt(S_values[index]) * (log(rho_storage[[index]] / (1 - rho_storage[[index]])) - theta_true)
+    
+    hist(W_vec, probability = TRUE, breaks = 25, col = "lightblue",
+         main = paste(title_suffix, "(S =", results_S$S[index], ")"),
+         xlab = "rho_true - rho_hat")
+    curve(dnorm(x, mean(W_vec), sd(W_vec)), col = "red", lwd = 2, add = TRUE)
+    abline(v = mean(W_vec), col = "darkgreen", lwd = 2)
+  }
+  
+  # Plot each separately
+  par(mfrow = c(1, 1), mar = c(4, 4, 3, 1))
+  plot_histogram(i_before, "Before Normality")
+  plot_histogram(i_normal, "Normality Achieved")
+  plot_histogram(i_after, "After Normality")
+  
+  # QQ plots
+  plot_qq <- function(index, title_suffix) {
+    W_vec <- sqrt(S_values[index]) * (log(rho_storage[[index]] / (1 - rho_storage[[index]])) - theta_true)
+    qqnorm(W_vec, main = paste(title_suffix, "(S =", results_S$S[index], ")"))
+    qqline(W_vec, col = "red", lwd = 2)
+  }
+  
+  # Plot each separately
+  par(mfrow = c(1, 1), mar = c(4, 4, 3, 1))
+  plot_qq(i_before, "QQ Before Normality")
+  plot_qq(i_normal, "QQ Normality Achieved")
+  plot_qq(i_after, "QQ After Normality")
+}
+
+```
+
+# Increase pj
+```{r}
+library(moments)
+set.seed(123)
+
+B <- c(2, 12, 5)
+m <- length(B)
+tau <- 5
+beta0 <- 12
+gamma0 <- c(0.05, 0.07, 0.06)
+alpha0 <- c(10, 12, 15)
+p_orig <- c(0.9, 0.8, 0.85)
+q <- c(0.2, 0.15, 0.3)
+
+n_sim <- 10000
+S_val <- 26  # fixed S
+
+
+X_true <- function(p) {
+  sapply(1:m, function(j) {
+    alpha0[j] * (1 - exp(-gamma0[j] * (p[j] - q[j]) * tau)) / (p[j] - q[j])
+  })
+}
+
+
+rho_true <- function(p) {
+  beta0 / (beta0 + sum(gamma0 * alpha0 * exp(-gamma0 * (p - q) * tau)))
+}
+cat("Base true system reliability:", rho_true(p_orig), "\n")
+
+
+one_simulation <- function(S, p) {
+  
+  X_t <- X_true(p)
+  
+  N_0 <- rpois(1, S * beta0 * tau)
+  beta_hat <- N_0 / (S * tau)
+  
+  gamma_hat <- numeric(m)
+  alpha_hat <- numeric(m)
+  
+  for (j in 1:m) {
+    Lambda_j <- S * gamma0[j] * (alpha0[j] - (p[j] - q[j]) * X_t[j]) * tau
+    N_j <- rpois(1, Lambda_j)
+    if (N_j == 0) return(NA)
+    
+    gamma_hat[j] <- N_j / (S * tau * (alpha0[j] - (p[j] - q[j]) * X_t[j]))
+    alpha_hat[j] <- N_j / (S * gamma_hat[j] * tau) + (p[j] - q[j]) * X_t[j]
+  }
+  
+  denom <- beta_hat + sum(gamma_hat * (alpha_hat - (p - q) * X_t))
+  if (denom <= 0) return(NA)
+  
+  rho_hat <- beta_hat / denom
+  return(rho_hat)
+}
+
+
+increase_vec <- c(0, 0.05, 0.10, 0.20)
+increase_labels <- paste0(c(0, 5, 10, 20), "%")
+
+results <- data.frame(
+  Increase = increase_labels,
+  p_values = NA,
+  rho_true = NA,
+  mean_rho_hat = NA,
+  sd_rho_hat = NA)
+
+for (i in seq_along(increase_vec)) {
+  p_new <- p_orig * (1 + increase_vec[i])
+  p_new <- pmin(p_new, 1)  # ensures no p_j > 1
+  
+  # Save p_j values as string
+  results$p_values[i] <- paste(round(p_new, 3), collapse = ", ")
+  results$rho_true[i] <- rho_true(p_new)
+ 
+  rho_hat_vec <- replicate(n_sim, one_simulation(S_val, p_new))
+  rho_hat_vec <- rho_hat_vec[!is.na(rho_hat_vec)]
+  
+  results$mean_rho_hat[i] <- mean(rho_hat_vec)
+  results$sd_rho_hat[i] <- sd(rho_hat_vec)
+}
+
+print(results)
+```
+
+# Decrease pj
+```{r}
+library(moments)
+set.seed(123)
+
+B <- c(2, 12, 5)
+m <- length(B)
+tau <- 5
+beta0 <- 12
+gamma0 <- c(0.05, 0.07, 0.06)
+alpha0 <- c(10, 12, 15)
+p_orig <- c(0.9, 0.8, 0.85)
+q <- c(0.2, 0.15, 0.3)
+
+n_sim <- 10000
+S_val <- 26  # fixed S
+
+X_true <- function(p) {
+  sapply(1:m, function(j) {
+    alpha0[j] * (1 - exp(-gamma0[j] * (p[j] - q[j]) * tau)) / (p[j] - q[j])
+  })
+}
+
+rho_true <- function(p) {
+  beta0 / (beta0 + sum(gamma0 * alpha0 * exp(-gamma0 * (p - q) * tau)))
+}
+cat("Base true system reliability:", rho_true(p_orig), "\n")
+
+one_simulation <- function(S, p) {
+  
+  X_t <- X_true(p)
+  
+  N_0 <- rpois(1, S * beta0 * tau)
+  beta_hat <- N_0 / (S * tau)
+  
+  gamma_hat <- numeric(m)
+  alpha_hat <- numeric(m)
+  
+  for (j in 1:m) {
+    Lambda_j <- S * gamma0[j] * (alpha0[j] - (p[j] - q[j]) * X_t[j]) * tau
+    N_j <- rpois(1, Lambda_j)
+    if (N_j == 0) return(NA)
+    
+    gamma_hat[j] <- N_j / (S * tau * (alpha0[j] - (p[j] - q[j]) * X_t[j]))
+    alpha_hat[j] <- N_j / (S * gamma_hat[j] * tau) + (p[j] - q[j]) * X_t[j]
+  }
+  
+  denom <- beta_hat + sum(gamma_hat * (alpha_hat - (p - q) * X_t))
+  if (denom <= 0) return(NA)
+  
+  rho_hat <- beta_hat / denom
+  return(rho_hat)
+}
+
+decrease_vec <- c(0, 0.05, 0.10, 0.30)
+decrease_labels <- paste0(c(0, 5, 10, 30), "%")
+
+results_decrease <- data.frame(
+  Decrease = decrease_labels,
+  p_values = NA,
+  rho_true = NA,
+  mean_rho_hat = NA,
+  sd_rho_hat = NA)
+
+for (i in seq_along(decrease_vec)) {
+  p_new <- p_orig * (1 - decrease_vec[i])
+  
+  results_decrease$p_values[i] <- paste(round(p_new, 3), collapse = ", ")
+  results_decrease$rho_true[i] <- rho_true(p_new)
+  
+  rho_hat_vec <- replicate(n_sim, one_simulation(S_val, p_new))
+  rho_hat_vec <- rho_hat_vec[!is.na(rho_hat_vec)]
+  
+  results_decrease$mean_rho_hat[i] <- mean(rho_hat_vec)
+  results_decrease$sd_rho_hat[i] <- sd(rho_hat_vec)
+}
+
+print(results_decrease)
+```
+
+# Increase qj
+```{r}
+library(moments)
+set.seed(123)
+
+B <- c(2, 12, 5)
+m <- length(B)
+tau <- 5
+beta0 <- 12
+gamma0 <- c(0.05, 0.07, 0.06)
+alpha0 <- c(10, 12, 15)
+p <- c(0.9, 0.8, 0.85)   # fixed
+q_orig <- c(0.2, 0.15, 0.3)
+
+n_sim <- 10000
+S_val <- 26  # fixed S
+
+
+X_true <- function(p, q) {
+  sapply(1:m, function(j) {
+    alpha0[j] * (1 - exp(-gamma0[j] * (p[j] - q[j]) * tau)) / (p[j] - q[j])
+  })
+}
+
+
+rho_true <- function(p, q) {
+  beta0 / (beta0 + sum(gamma0 * alpha0 * exp(-gamma0 * (p - q) * tau)))
+}
+cat("Base true system reliability:", rho_true(p, q_orig), "\n")
+
+one_simulation <- function(S, p, q) {
+  
+  X_t <- X_true(p, q)
+  
+  N_0 <- rpois(1, S * beta0 * tau)
+  beta_hat <- N_0 / (S * tau)
+  
+  gamma_hat <- numeric(m)
+  alpha_hat <- numeric(m)
+  
+  for (j in 1:m) {
+    Lambda_j <- S * gamma0[j] * (alpha0[j] - (p[j] - q[j]) * X_t[j]) * tau
+    N_j <- rpois(1, Lambda_j)
+    if (N_j == 0) return(NA)
+    
+    gamma_hat[j] <- N_j / (S * tau * (alpha0[j] - (p[j] - q[j]) * X_t[j]))
+    alpha_hat[j] <- N_j / (S * gamma_hat[j] * tau) + (p[j] - q[j]) * X_t[j]
+  }
+  
+  denom <- beta_hat + sum(gamma_hat * (alpha_hat - (p - q) * X_t))
+  if (denom <= 0) return(NA)
+  
+  rho_hat <- beta_hat / denom
+  return(rho_hat)
+}
+
+increase_vec <- c(0, 0.20, 0.40, 0.80)
+increase_labels <- paste0(c(0, 20, 40, 80), "%")
+
+results <- data.frame(
+  Increase = increase_labels,
+  q_values = NA,
+  rho_true = NA,
+  mean_rho_hat = NA,
+  sd_rho_hat = NA)
+
+for (i in seq_along(increase_vec)) {
+  q_new <- q_orig * (1 + increase_vec[i])
+  q_new <- pmin(q_new, 1)  # cap at 1
+  
+  results$q_values[i] <- paste(round(q_new, 3), collapse = ", ")
+  results$rho_true[i] <- rho_true(p, q_new)
+  
+  rho_hat_vec <- replicate(n_sim, one_simulation(S_val, p, q_new))
+  rho_hat_vec <- rho_hat_vec[!is.na(rho_hat_vec)]
+  
+  results$mean_rho_hat[i] <- mean(rho_hat_vec)
+  results$sd_rho_hat[i] <- sd(rho_hat_vec)
+}
+
+print(results)
+```
+
+# Decrease qj
+```{r}
+library(moments)
+set.seed(123)
+
+B <- c(2, 12, 5)
+m <- length(B)
+tau <- 5
+beta0 <- 12
+gamma0 <- c(0.05, 0.07, 0.06)
+alpha0 <- c(10, 12, 15)
+p <- c(0.9, 0.8, 0.85)   # fixed
+q_orig <- c(0.2, 0.15, 0.3)
+
+n_sim <- 10000
+S_val <- 26  # fixed S
+
+X_true <- function(p, q) {
+  sapply(1:m, function(j) {
+    alpha0[j] * (1 - exp(-gamma0[j] * (p[j] - q[j]) * tau)) / (p[j] - q[j])
+  })
+}
+
+rho_true <- function(p, q) {
+  beta0 / (beta0 + sum(gamma0 * alpha0 * exp(-gamma0 * (p - q) * tau)))
+}
+cat("Base true system reliability:", rho_true(p, q_orig), "\n")
+
+one_simulation <- function(S, p, q) {
+  
+  X_t <- X_true(p, q)
+  
+  N_0 <- rpois(1, S * beta0 * tau)
+  beta_hat <- N_0 / (S * tau)
+  
+  gamma_hat <- numeric(m)
+  alpha_hat <- numeric(m)
+  
+  for (j in 1:m) {
+    Lambda_j <- S * gamma0[j] * (alpha0[j] - (p[j] - q[j]) * X_t[j]) * tau
+    N_j <- rpois(1, Lambda_j)
+    if (N_j == 0) return(NA)
+    
+    gamma_hat[j] <- N_j / (S * tau * (alpha0[j] - (p[j] - q[j]) * X_t[j]))
+    alpha_hat[j] <- N_j / (S * gamma_hat[j] * tau) + (p[j] - q[j]) * X_t[j]
+  }
+  
+  denom <- beta_hat + sum(gamma_hat * (alpha_hat - (p - q) * X_t))
+  if (denom <= 0) return(NA)
+  
+  rho_hat <- beta_hat / denom
+  return(rho_hat)
+}
+
+decrease_vec <- c(0, 0.20, 0.40, 0.60)
+decrease_labels <- paste0(c(0, 20, 40, 60), "%")
+
+results <- data.frame(
+  Decrease = decrease_labels,
+  q_values = NA,
+  rho_true = NA,
+  mean_rho_hat = NA,
+  sd_rho_hat = NA)
+
+for (i in seq_along(decrease_vec)) {
+  q_new <- q_orig * (1 - decrease_vec[i])
+  q_new <- pmax(q_new, 0)  # ensure q_j >= 0
+  
+  results$q_values[i] <- paste(round(q_new, 3), collapse = ", ")
+  results$rho_true[i] <- rho_true(p, q_new)
+  
+  rho_hat_vec <- replicate(n_sim, one_simulation(S_val, p, q_new))
+  rho_hat_vec <- rho_hat_vec[!is.na(rho_hat_vec)]
+  
+  results$mean_rho_hat[i] <- mean(rho_hat_vec)
+  results$sd_rho_hat[i] <- sd(rho_hat_vec)
+}
+
+print(results)
+```
+
+
+# Stopping criteron
+```{r}
+library(moments)
+set.seed(123)
+
+# Parameters
+B <- c(2, 12, 5)
+m <- length(B)
+S_fixed <- 26          
+tau_init <- 0        
+tau_max <- 100          
+tau_step <- 2       
+beta0 <- 12
+gamma0 <- c(0.05, 0.07, 0.06)
+alpha0 <- c(10, 12, 15)
+p <- c(0.9, 0.8, 0.85)
+q <- c(0.2, 0.15, 0.3)
+
+n_sim <- 1000          
+epsilon <- 0.001  
+
+# Function to compute X_true given tau
+compute_X_true <- function(tau) {
+  sapply(1:m, function(j) {
+    alpha0[j] * (1 - exp(-gamma0[j]*(p[j] - q[j])*tau))/(p[j] - q[j])
+  })
+}
+
+# One Monte Carlo simulation
+one_simulation <- function(S, tau, X_true) {
+  N_0 <- rpois(1, S*beta0*tau)
+  beta_hat <- N_0/(S*tau)
+  
+  gamma_hat <- numeric(m)
+  alpha_hat <- numeric(m)
+  
+  for (j in 1:m) {
+    Lambda_j <- S*gamma0[j]*(alpha0[j] - (p[j] - q[j])*X_true[j])*tau
+    N_j <- rpois(1, Lambda_j)
+    if (N_j == 0) return(NA)
+    
+    gamma_hat[j] <- N_j/(S*tau*(alpha0[j] - (p[j] - q[j])*X_true[j]))
+    alpha_hat[j] <- N_j/(S*gamma_hat[j]*tau) + (p[j] - q[j])*X_true[j]
+  }
+  
+  denom <- beta_hat + sum(gamma_hat*(alpha_hat - (p - q)*X_true))
+  if (denom <= 0) return(NA)
+  
+  rho_hat <- beta_hat / denom
+  return(rho_hat)
+}
+
+
+tau_values <- seq(tau_init, tau_max, by = tau_step)
+results_tau <- data.frame(
+  tau = tau_values,
+  rho_true = NA,
+  mean_rho_hat = NA,
+  rel_change = NA)
+
+rho_prev <- NA
+optimal_tau <- NA
+
+# Loop over tau values
+for (i in seq_along(tau_values)) {
+  tau <- tau_values[i]
+  X_true <- compute_X_true(tau)
+  
+  rho_hat_vec <- replicate(n_sim, one_simulation(S_fixed, tau, X_true))
+  rho_hat_vec <- rho_hat_vec[!is.na(rho_hat_vec)]
+  
+  rho_mean <- mean(rho_hat_vec)
+  rho_sd <- sd(rho_hat_vec)
+  
+  # Relative change
+  if (!is.na(rho_prev)) {
+    rel_change <- abs(rho_prev - rho_mean) / rho_mean
+  } else {
+    rel_change <- NA
+  }
+  
+  # Store results
+  results_tau$rho_true[i] <- beta0/(beta0 + sum(gamma0*alpha0*exp(-gamma0*(p - q)*tau)))
+  results_tau$mean_rho_hat[i] <- rho_mean
+  results_tau$rel_change[i] <- rel_change
+  
+  # Check stopping criterion
+  if (!is.na(rel_change) && rel_change < epsilon && is.na(optimal_tau)) {
+    optimal_tau <- tau
+  }
+  
+  rho_prev <- rho_mean
+}
+print(results_tau)
+cat("Optimal stopping time based on relative change <", epsilon, "is:", optimal_tau, "\n")
+
+stop_index <- which(results_tau$rel_change < 0.001)[1]  
+tau_stop <- results_tau$tau[stop_index]
+
+library(ggplot2)
+
+ggplot(results_tau, aes(x = tau)) +
+  geom_line(aes(y = rho_true, color = "True reliability"), size = 1) +
+  geom_line(aes(y = mean_rho_hat, color = "Estimated reliability"), linetype = "dotted", size = 1) +
+  geom_vline(aes(xintercept = tau_stop, color = "Stopping time"), size = 0.8) +
+  scale_color_manual(
+    values = c("True reliability" = "yellow", "Estimated reliability" = "darkred", "Stopping time" = "darkblue")
+  ) +
+  labs(
+    x = expression(tau),
+    y = expression(hat(rho)),
+    title = "System Reliability vs Stopping Time",
+    color = NULL   # removes legend title (cleaner)
+  ) +
+  theme_minimal(base_size = 12)
+```
