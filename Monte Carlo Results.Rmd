@@ -34,6 +34,8 @@ X_true <- sapply(1:m, function(j) {
 # True system reliability
 rho_true <- beta0/(beta0 + sum(gamma0*alpha0*exp(-gamma0*(p - q)*tau)))
 cat("True system reliability:", rho_true, "\n")
+
+# Logit of true reliability (for normality assessment)
 theta_true <- log(rho_true / (1 - rho_true))
 
 # One Monte Carlo simulation
@@ -160,7 +162,7 @@ set.seed(123)
 
 B <- c(2, 12, 5)
 m <- length(B)
-tau <- 5
+tau <- 72
 beta0 <- 12
 gamma0 <- c(0.05, 0.07, 0.06)
 alpha0 <- c(10, 12, 15)
@@ -211,8 +213,8 @@ one_simulation <- function(S, p) {
 }
 
 
-increase_vec <- c(0, 0.05, 0.10, 0.20)
-increase_labels <- paste0(c(0, 5, 10, 20), "%")
+increase_vec <- c(0, 0.05, 0.10, 0.15)
+increase_labels <- paste0(c(0, 5, 10, 15), "%")
 
 results <- data.frame(
   Increase = increase_labels,
@@ -246,7 +248,7 @@ set.seed(123)
 
 B <- c(2, 12, 5)
 m <- length(B)
-tau <- 5
+tau <- 72
 beta0 <- 12
 gamma0 <- c(0.05, 0.07, 0.06)
 alpha0 <- c(10, 12, 15)
@@ -293,8 +295,8 @@ one_simulation <- function(S, p) {
   return(rho_hat)
 }
 
-decrease_vec <- c(0, 0.05, 0.10, 0.30)
-decrease_labels <- paste0(c(0, 5, 10, 30), "%")
+decrease_vec <- c(0, 0.05, 0.10, 0.15)
+decrease_labels <- paste0(c(0, 5, 10, 15), "%")
 
 results_decrease <- data.frame(
   Decrease = decrease_labels,
@@ -326,7 +328,7 @@ set.seed(123)
 
 B <- c(2, 12, 5)
 m <- length(B)
-tau <- 5
+tau <- 72
 beta0 <- 12
 gamma0 <- c(0.05, 0.07, 0.06)
 alpha0 <- c(10, 12, 15)
@@ -375,8 +377,8 @@ one_simulation <- function(S, p, q) {
   return(rho_hat)
 }
 
-increase_vec <- c(0, 0.20, 0.40, 0.80)
-increase_labels <- paste0(c(0, 20, 40, 80), "%")
+increase_vec <- c(0, 0.05, 0.10, 0.15)
+increase_labels <- paste0(c(0, 5, 10, 15), "%")
 
 results <- data.frame(
   Increase = increase_labels,
@@ -409,7 +411,7 @@ set.seed(123)
 
 B <- c(2, 12, 5)
 m <- length(B)
-tau <- 5
+tau <- 72
 beta0 <- 12
 gamma0 <- c(0.05, 0.07, 0.06)
 alpha0 <- c(10, 12, 15)
@@ -456,8 +458,8 @@ one_simulation <- function(S, p, q) {
   return(rho_hat)
 }
 
-decrease_vec <- c(0, 0.20, 0.40, 0.60)
-decrease_labels <- paste0(c(0, 20, 40, 60), "%")
+decrease_vec <- c(0, 0.05, 0.10, 0.15)
+decrease_labels <- paste0(c(0, 5, 10, 15), "%")
 
 results <- data.frame(
   Decrease = decrease_labels,
@@ -600,4 +602,3 @@ ggplot(results_tau, aes(x = tau)) +
   ) +
   theme_minimal(base_size = 12)
 ```
-
